@@ -1,11 +1,9 @@
-package examplefuncsplayer;
+package gopherbot;
 
 import battlecode.common.*;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
@@ -29,7 +27,7 @@ public strictfp class RobotPlayer {
      * import at the top of this file. Here, we *seed* the RNG with a constant number (6147); this makes sure
      * we get the same sequence of numbers every time this code is run. This is very useful for debugging!
      */
-    static final Random rng = new Random(6147);
+    static final Random rng = new Random(69420);
 
     /** Array containing all the possible movement directions. */
     static final Direction[] directions = {
@@ -67,11 +65,11 @@ public strictfp class RobotPlayer {
                 // this into a different control structure!
                 switch (rc.getType()) {
                     case HEADQUARTERS:     runHeadquarters(rc);  break;
-                    case CARRIER:      runCarrier(rc);   break;
-                    case LAUNCHER: runLauncher(rc); break;
-                    case BOOSTER: // Examplefuncsplayer doesn't use any of these robot types below.
-                    case DESTABILIZER: // You might want to give them a try!
-                    case AMPLIFIER:       break;
+                    case CARRIER:      runCarrier(rc);   break; //1
+                    case LAUNCHER: runLauncher(rc); break; //2
+                    case BOOSTER: runBooster(rc); break; //3
+                    case DESTABILIZER: runDestabilizer(rc); break;//4
+                    case AMPLIFIER:       runAmplifier(rc); break;//5
                 }
 
             } catch (GameActionException e) {
@@ -103,6 +101,11 @@ public strictfp class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     static void runHeadquarters(RobotController rc) throws GameActionException {
+        //TODO: spawn robots based on robot counters
+        //update turn count in array and reset robot counters
+        if (rc.readSharedArray(0) < turnCount) {
+            rc.writeSharedArray(0, turnCount);
+        }
         // Pick a direction to build in.
         Direction dir = directions[rng.nextInt(directions.length)];
         MapLocation newLoc = rc.getLocation().add(dir);
@@ -128,6 +131,8 @@ public strictfp class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     static void runCarrier(RobotController rc) throws GameActionException {
+        rc.writeSharedArray(1, rc.readSharedArray(1)+1);
+
         if (rc.getAnchor() != null) {
             // If I have an anchor singularly focus on getting it to the first island I see
             int[] islands = rc.senseNearbyIslands();
@@ -138,10 +143,12 @@ public strictfp class RobotPlayer {
             }
             if (islandLocs.size() > 0) {
                 MapLocation islandLocation = islandLocs.iterator().next();
-                while (!rc.getLocation().equals(islandLocation)) {
+                while (!rc.getLocation().equals(islandLocation)) { //TODO: general navigation
                     Direction dir = rc.getLocation().directionTo(islandLocation);
                     if (rc.canMove(dir)) {
                         rc.move(dir);
+                    } else {
+                        break;
                     }
                 }
                 if (rc.canPlaceAnchor()) {
@@ -153,23 +160,26 @@ public strictfp class RobotPlayer {
         MapLocation me = rc.getLocation();
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
-                MapLocation wellLocation = new MapLocation(me.x + dx, me.y + dy);
-                if (rc.canCollectResource(wellLocation, -1)) {
+                MapLocation newLocation = new MapLocation(me.x + dx, me.y + dy);
+                if (rc.canCollectResource(newLocation, -1)) {
                     if (rng.nextBoolean()) {
-                        rc.collectResource(wellLocation, -1);
+                        rc.collectResource(newLocation, -1);
                     }
                 }
-            }
-        }
-        // Occasionally try out the carriers attack
-        if (rng.nextInt(20) == 1) {
-            RobotInfo[] enemyRobots = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
-            if (enemyRobots.length > 0) {
-                if (rc.canAttack(enemyRobots[0].location)) {
-                    rc.attack(enemyRobots[0].location);
+                if (rc.canTakeAnchor(newLocation, Anchor.STANDARD)) {
+                    rc.takeAnchor(newLocation, Anchor.STANDARD);
                 }
             }
         }
+//        // Occasionally try out the carriers attack
+//        if (rng.nextInt(20) == 1) {
+//            RobotInfo[] enemyRobots = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
+//            if (enemyRobots.length > 0) {
+//                if (rc.canAttack(enemyRobots[0].location)) {
+//                    rc.attack(enemyRobots[0].location);
+//                }
+//            }
+//        }
         
         // If we can see a well, move towards it
         WellInfo[] wells = rc.senseNearbyWells();
@@ -191,6 +201,7 @@ public strictfp class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     static void runLauncher(RobotController rc) throws GameActionException {
+        rc.writeSharedArray(2, rc.readSharedArray(2)+1);
         // Try to attack someone
         int radius = rc.getType().actionRadiusSquared;
         Team opponent = rc.getTeam().opponent();
@@ -209,5 +220,17 @@ public strictfp class RobotPlayer {
         if (rc.canMove(dir)) {
             rc.move(dir);
         }
+    }
+
+    static void runBooster(RobotController rc) throws GameActionException {
+        rc.writeSharedArray(3, rc.readSharedArray(3)+1);
+    }
+
+    static void runDestabilizer(RobotController rc) throws GameActionException {
+        rc.writeSharedArray(4, rc.readSharedArray(4)+1);
+    }
+
+    static void runAmplifier(RobotController rc) throws GameActionException {
+        rc.writeSharedArray(5, rc.readSharedArray(5)+1);
     }
 }
