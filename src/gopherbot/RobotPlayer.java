@@ -2,10 +2,7 @@ package gopherbot;
 
 import battlecode.common.*;
 
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 /**
  * RobotPlayer is the class that describes your main robot strategy.
@@ -29,6 +26,35 @@ public strictfp class RobotPlayer {
      */
     static final Random rng = new Random(69420);
 
+    static int[] buildRatios = {5, 5, 3,2,1}; //in order of buildPriorities
+    static RobotType[] buildPriorities = {RobotType.CARRIER, RobotType.LAUNCHER, RobotType.AMPLIFIER, RobotType.BOOSTER, RobotType.DESTABILIZER};
+
+    static Map<RobotType, Integer> robotTypeToInteger;
+
+    static {
+        robotTypeToInteger = new HashMap<RobotType, Integer>();
+        robotTypeToInteger.put(RobotType.HEADQUARTERS, 0);
+        robotTypeToInteger.put(RobotType.CARRIER, 1);
+        robotTypeToInteger.put(RobotType.LAUNCHER, 2);
+        robotTypeToInteger.put(RobotType.BOOSTER, 3);
+        robotTypeToInteger.put(RobotType.DESTABILIZER, 4);
+        robotTypeToInteger.put(RobotType.AMPLIFIER, 5);
+    }
+
+    static Map<Integer, RobotType> integerToRobotType;
+
+    static {
+        integerToRobotType = new HashMap<Integer, RobotType>();
+        integerToRobotType.put(0, RobotType.HEADQUARTERS);
+        integerToRobotType.put(1, RobotType.CARRIER);
+        integerToRobotType.put(2, RobotType.LAUNCHER);
+        integerToRobotType.put(3, RobotType.BOOSTER);
+        integerToRobotType.put(4, RobotType.DESTABILIZER);
+        integerToRobotType.put(5, RobotType.AMPLIFIER);
+    }
+
+    static int numHeadquarters;
+
     /** Array containing all the possible movement directions. */
     static final Direction[] directions = {
         Direction.NORTH,
@@ -50,6 +76,9 @@ public strictfp class RobotPlayer {
      **/
     @SuppressWarnings("unused")
     public static void run(RobotController rc) throws GameActionException {
+        if (rc.getType() == RobotType.HEADQUARTERS) {
+            numHeadquarters = rc.getRobotCount();
+        }
         while (true) {
             // This code runs during the entire lifespan of the robot, which is why it is in an infinite
             // loop. If we ever leave this loop and return from run(), the robot dies! At the end of the
@@ -63,13 +92,16 @@ public strictfp class RobotPlayer {
                 // different types. Here, we separate the control depending on the RobotType, so we can
                 // use different strategies on different robots. If you wish, you are free to rewrite
                 // this into a different control structure!
+                if (rc.getType() != RobotType.HEADQUARTERS) {
+                    rc.writeSharedArray(robotTypeToInteger.get(rc.getType()), rc.readSharedArray(robotTypeToInteger.get(rc.getType()))+1);
+                }
                 switch (rc.getType()) {
                     case HEADQUARTERS:     runHeadquarters(rc);  break;
                     case CARRIER:      runCarrier(rc);   break; //1
                     case LAUNCHER: runLauncher(rc); break; //2
                     case BOOSTER: runBooster(rc); break; //3
-                    case DESTABILIZER: runDestabilizer(rc); break;//4
-                    case AMPLIFIER:       runAmplifier(rc); break;//5
+                    case DESTABILIZER: runDestabilizer(rc); break; //4
+                    case AMPLIFIER:       runAmplifier(rc); break; //5
                 }
 
             } catch (GameActionException e) {
@@ -100,28 +132,54 @@ public strictfp class RobotPlayer {
      * Run a single turn for a Headquarters.
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
+
     static void runHeadquarters(RobotController rc) throws GameActionException {
-        //TODO: spawn robots based on robot counters
-        //update turn count in array and reset robot counters
-        if (rc.readSharedArray(0) < turnCount) {
-            rc.writeSharedArray(0, turnCount);
+        boolean isLastToRun = (rc.readSharedArray(0) == numHeadquarters-1);
+        if (rc.readSharedArray(0) == numHeadquarters) { //is first to run
+            rc.writeSharedArray(0, 0);
         }
         // Pick a direction to build in.
-        Direction dir = directions[rng.nextInt(directions.length)];
-        MapLocation newLoc = rc.getLocation().add(dir);
+
         if (rc.canBuildAnchor(Anchor.STANDARD)) {
             // If we can build an anchor do it!
             rc.buildAnchor(Anchor.STANDARD);
         }
-        if (rng.nextBoolean()) {
-            // Let's try to build a carrier.
-            if (rc.canBuildRobot(RobotType.CARRIER, newLoc)) {
-                rc.buildRobot(RobotType.CARRIER, newLoc);
+
+        String robotCountData = "";
+        for (int i = 1; i <= 5; i ++) {
+            robotCountData += rc.readSharedArray(i) + " ";
+        }
+        rc.setIndicatorString(robotCountData);
+
+        MapLocation newLoc = null;
+        for (Direction dir : directions) {
+            newLoc = rc.getLocation().add(dir);
+            if (rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
+                break;
             }
-        } else {
-            // Let's try to build a launcher.
-            if (rc.canBuildRobot(RobotType.LAUNCHER, newLoc)) {
-                rc.buildRobot(RobotType.LAUNCHER, newLoc);
+        }
+        for (int i = 0; i <= 4; i++) {
+            int refInd = (i + 1) % 5;
+            int currAmount = rc.readSharedArray(robotTypeToInteger.get(buildPriorities[i]));
+            if (currAmount < 5) {
+                if (rc.canBuildRobot(buildPriorities[i], newLoc)) {
+                    rc.buildRobot(buildPriorities[i], newLoc);
+                    break;
+                }
+            }
+            int refAmount = rc.readSharedArray(robotTypeToInteger.get(buildPriorities[refInd]));
+            if (currAmount*buildRatios[refInd] < refAmount * buildRatios[i]) {
+                if (rc.canBuildRobot(buildPriorities[i], newLoc)) {
+                    rc.buildRobot(buildPriorities[i], newLoc);
+                    break;
+                }
+            }
+        }
+
+        rc.writeSharedArray(0, rc.readSharedArray(0)+1);
+        if (isLastToRun) {
+            for (int i = 1; i <= 5; i ++) {
+                rc.writeSharedArray(i, 0);
             }
         }
     }
@@ -131,8 +189,6 @@ public strictfp class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     static void runCarrier(RobotController rc) throws GameActionException {
-        rc.writeSharedArray(1, rc.readSharedArray(1)+1);
-
         if (rc.getAnchor() != null) {
             // If I have an anchor singularly focus on getting it to the first island I see
             int[] islands = rc.senseNearbyIslands();
@@ -201,7 +257,6 @@ public strictfp class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     static void runLauncher(RobotController rc) throws GameActionException {
-        rc.writeSharedArray(2, rc.readSharedArray(2)+1);
         // Try to attack someone
         int radius = rc.getType().actionRadiusSquared;
         Team opponent = rc.getTeam().opponent();
@@ -223,14 +278,11 @@ public strictfp class RobotPlayer {
     }
 
     static void runBooster(RobotController rc) throws GameActionException {
-        rc.writeSharedArray(3, rc.readSharedArray(3)+1);
     }
 
     static void runDestabilizer(RobotController rc) throws GameActionException {
-        rc.writeSharedArray(4, rc.readSharedArray(4)+1);
     }
 
     static void runAmplifier(RobotController rc) throws GameActionException {
-        rc.writeSharedArray(5, rc.readSharedArray(5)+1);
     }
 }
