@@ -116,6 +116,7 @@ public strictfp class RobotPlayer {
     }
 
     static int numHeadquarters;
+    static MapLocation spawnPoint;
 
     /** Array containing all the possible movement directions. */
     static final Direction[] directions = {
@@ -134,6 +135,7 @@ public strictfp class RobotPlayer {
         if (rc.getType() == RobotType.HEADQUARTERS) {
             numHeadquarters = rc.getRobotCount();
         }
+        spawnPoint = rc.getLocation();
         while (true) {
             turnCount += 1;  // We have now been alive for one more turn!
 
@@ -570,35 +572,42 @@ public strictfp class RobotPlayer {
         }
     }
 
+    static MapLocation currMoveTarget = null;
+
     static boolean isUnloading = false;
     static void runCarrier(RobotController rc) throws GameActionException {
         if (rc.getAnchor() != null) {
             if (rc.canWriteSharedArray(0,0)) {
                 rc.writeSharedArray(6, rc.readSharedArray(6)+1);
             }
-            // If I have an anchor singularly focus on getting it to the first island I see
-            int[] islands = rc.senseNearbyIslands();
-            Set<MapLocation> islandLocs = new HashSet<>();
-            for (int id : islands) {
-                MapLocation[] thisIslandLocs = rc.senseNearbyIslandLocations(id);
-                islandLocs.addAll(Arrays.asList(thisIslandLocs));
-            }
-            if (islandLocs.size() > 0) {
-                MapLocation islandLocation = null;
-                for (MapLocation mapLocation : islandLocs) {
-                    if (rc.senseTeamOccupyingIsland(rc.senseIsland(mapLocation)) == Team.NEUTRAL) {
-                        islandLocation = mapLocation;
+            // // If I have an anchor singularly focus on getting it to the first island I see
+            // int[] islands = rc.senseNearbyIslands();
+            // Set<MapLocation> islandLocs = new HashSet<>();
+            // for (int id : islands) {
+            //     MapLocation[] thisIslandLocs = rc.senseNearbyIslandLocations(id);
+            //     islandLocs.addAll(Arrays.asList(thisIslandLocs));
+            // }
+            if (islandLocations.size() > 0) {
+                if (currMoveTarget == null) {
+                    for (MapLocation mapLocation : islandLocations.keySet()) {
+                        if (islandLocations.get(mapLocation) == Team.NEUTRAL) {
+                            currMoveTarget = mapLocation;
+                            break;
+                        }
                     }
                 }
-                if (islandLocation != null) {
-                    if (!rc.getLocation().equals(islandLocation)) { //TODO: general navigation
-                        Direction dir = rc.getLocation().directionTo(islandLocation);
+                
+                if (currMoveTarget != null) {
+                    if (!rc.getLocation().equals(currMoveTarget)) { //TODO: general navigation (i.e. custom "directionTo" method based on currMoveTarget)
+                        Direction dir = rc.getLocation().directionTo(currMoveTarget);
                         if (rc.canMove(dir)) {
                             rc.move(dir);
                         }
-                    }
-                    if (rc.canPlaceAnchor() && rc.senseTeamOccupyingIsland(rc.senseIsland(islandLocation)) == Team.NEUTRAL) {
-                        rc.placeAnchor();
+                    } else {
+                        if (rc.canPlaceAnchor()) {
+                            rc.placeAnchor();
+                        }
+                        currMoveTarget = null;
                     }
                 } else {
                     randomMove(rc);
@@ -630,35 +639,45 @@ public strictfp class RobotPlayer {
         }
         rc.setIndicatorString("Is unloading: " + String.valueOf(isUnloading));
        // Occasionally try out the carriers attack
-       if (turnCount % 5 == 1) {
-           RobotInfo[] enemyRobots = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
-           if (enemyRobots.length > 0 && rc.senseNearbyRobots(-1, rc.getTeam()).length == 0) { //TODO: check if there are nearby friendly robots, but they can't attack
-               if (rc.canAttack(enemyRobots[0].location)) {
-                   rc.attack(enemyRobots[0].location);
-               }
-           }
-       }
+        RobotInfo[] nearbyRobots = rc.senseNearbyRobots(-1, rc.getTeam());
+        boolean enemyHasAttackers = false;
+        boolean selfHasAttackers = false;
+        RobotInfo firstEnemy = null;
+        for (RobotInfo robotInfo : nearbyRobots) {
+            if (robotInfo.getType() == RobotType.LAUNCHER) {
+                if (robotInfo.getTeam() == rc.getTeam()) {
+                    selfHasAttackers = true;
+                } else {
+                    enemyHasAttackers = true;
+                }
+                if (selfHasAttackers && enemyHasAttackers) {
+                    break;
+                }
+            }
+            if (firstEnemy == null && robotInfo.getTeam() != rc.getTeam()) {
+                firstEnemy = robotInfo;
+            }
+        }
+        if (enemyHasAttackers && !selfHasAttackers) { //TODO: check if there are nearby friendly robots, but they can't attack
+            if (rc.canAttack(firstEnemy.location)) {
+                rc.attack(firstEnemy.location);
+            }
+        }
 
         if (!isUnloading && rc.getResourceAmount(ResourceType.ADAMANTIUM) + rc.getResourceAmount(ResourceType.MANA) + rc.getResourceAmount(ResourceType.ELIXIR) < 40) {
             // If we can see a well, move towards it
             WellInfo[] wells = rc.senseNearbyWells();
             if (wells.length >= 1) {
-                WellInfo well_one = wells[0];
-                Direction dir = me.directionTo(well_one.getMapLocation());
+                WellInfo targetWell = wells[0];
+                Direction dir = me.directionTo(targetWell.getMapLocation());  //TODO: set well as target, do movement after all checks (moving to islands too)
                 if (rc.canMove(dir)) {
                     rc.move(dir);
                 }
             }
         } else {
-            RobotInfo[] nearbyRobots = rc.senseNearbyRobots(-1);
-            for (RobotInfo robot : nearbyRobots) {
-                if (robot.getTeam() == rc.getTeam() && robot.getType() == RobotType.HEADQUARTERS) {
-                    Direction dir = me.directionTo(robot.getLocation());
-                    if (rc.canMove(dir)) {
-                        rc.move(dir);
-                        break;
-                    }
-                }
+            Direction dir = me.directionTo(spawnPoint); //TODO: store multiple headquarters
+            if (rc.canMove(dir)) {
+                rc.move(dir);
             }
         }
 
@@ -683,31 +702,60 @@ public strictfp class RobotPlayer {
         }
 
         // Also try to move randomly.
-        Direction dir = directions[rng.nextInt(directions.length)];
-        if (rc.canMove(dir)) {
-            rc.move(dir);
+        // Direction dir = directions[rng.nextInt(directions.length)];
+        // if (rc.canMove(dir)) {
+        //     rc.move(dir);
+        // }
+
+        if (islandLocations.size() > 0) {
+            if (currMoveTarget == null) {
+                for (MapLocation mapLocation : islandLocations.keySet()) {
+                    if (islandLocations.get(mapLocation) == Team.NEUTRAL && rng.nextInt(rc.getIslandCount()) == 0) { //TODO: (unrelated to code here) create channel in shared array specializing in island and well updates (priority)
+                        currMoveTarget = mapLocation;
+                        break;
+                    }
+                }
+            }
+            if (currMoveTarget != null) {
+                if (!rc.getLocation().equals(currMoveTarget)) { //TODO: general navigation
+                    rc.setIndicatorString(currMoveTarget.x + " " + currMoveTarget.y);
+                    Direction dir = rc.getLocation().directionTo(currMoveTarget);
+                    if (rc.canMove(dir)) {
+                        rc.move(dir);
+                    }
+                } else {
+                    currMoveTarget = null;
+                }
+            }
         }
+        randomMove(rc);
     }
 
     static void followTeammates(RobotController rc) throws GameActionException{
         MapLocation me = rc.getLocation();
         Vector2 currVector = new Vector2(0,0);
         RobotInfo[] robotInfos = rc.senseNearbyRobots(-1, rc.getTeam());
+        int numNearbyAmplifiers = 0;
         for (RobotInfo robotInfo : robotInfos) {
-            Vector2 normVectorToRobot = (new Vector2(robotInfo.getLocation().x-me.x, robotInfo.getLocation().y-me.y)).normalized();
-            if (robotInfo.getType() == RobotType.AMPLIFIER || robotInfo.getType() == RobotType.HEADQUARTERS) {
-                // currVector = currVector.subtract(normVectorToRobot);
-            } else {
+            if (robotInfo.getType() != RobotType.AMPLIFIER && robotInfo.getType() != RobotType.HEADQUARTERS) {
+                Vector2 normVectorToRobot = (new Vector2(robotInfo.getLocation().x-me.x, robotInfo.getLocation().y-me.y)).normalized();
                 currVector = currVector.add(normVectorToRobot);
+            } else if (robotInfo.getType() == RobotType.AMPLIFIER) {
+                numNearbyAmplifiers++;
             }
         }
 
         Direction direction = currVector.toDirection();
         rc.setIndicatorString(currVector.x + " " + currVector.y + " " + String.valueOf(currVector.getAngle()));
-        if (rc.canMove(direction) && (currVector.x != 0 || currVector.y != 0)) {
+        if ((currVector.x != 0 || currVector.y != 0) && rc.canMove(direction) && numNearbyAmplifiers <= 1) { //at most one other friendly amplifier
             rc.move(direction);
         } else {
-            randomMove(rc);
+            direction = rc.getLocation().directionTo(spawnPoint); //try to move back to spawn and find another robot to follow on the way there
+            if (rc.canMove(direction)) {
+                rc.move(direction);
+            } else {
+                randomMove(rc);
+            }
         }
     }
 
