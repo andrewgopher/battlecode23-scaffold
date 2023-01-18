@@ -1,7 +1,6 @@
 package gopherbot;
 
 import battlecode.common.*;
-import battlecode.schema.Vec;
 
 import java.util.*;
 
@@ -68,7 +67,8 @@ public strictfp class RobotPlayer {
      * these variables are static, in Battlecode they aren't actually shared between your robots.
      */
     static int turnCount = 0;
-    static final int mapInfoStart = 7; //where the map info queue starts in the shared array
+    static final int mapInfoStart1 = 7; //where the map info queue starts in the shared array; WELL AND ISLAND ONLY
+    static final int mapInfoStart2 = 27;
     static final int sharedArraySize = 64;
 
     /**
@@ -79,7 +79,7 @@ public strictfp class RobotPlayer {
      */
     static final Random rng = new Random(69420);
 
-    static float[] buildRatios = {5, 6, 2,3,4};
+    static float[] buildRatios = {5, 6, 2,3, 2};
 
     static int robotTypeToInt(RobotType robotType) {
         if (robotType == RobotType.HEADQUARTERS) {
@@ -143,7 +143,7 @@ public strictfp class RobotPlayer {
                 if (rc.getType() != RobotType.HEADQUARTERS && rc.canWriteSharedArray(0, 0)) {
                     rc.writeSharedArray(robotTypeToInt(rc.getType()), rc.readSharedArray(robotTypeToInt(rc.getType()))+1);
                 }
-                if (rc.getType() != RobotType.HEADQUARTERS && rc.getRoundNum() % 2 == 1 && (turnCount%5 == 4)) {
+                if (rc.getType() != RobotType.HEADQUARTERS && rc.getRoundNum() % 2 == 1) {
                     broadcastMapInfos(rc);
                 }
                 if (rc.getRoundNum() % 2 == 0) {
@@ -285,27 +285,41 @@ public strictfp class RobotPlayer {
     static void broadcastMapInfos(RobotController rc) throws GameActionException {
         int byteCodeStart = Clock.getBytecodeNum();
 
-        int firstAvailableInd = 64;
-        for (int i = mapInfoStart; i < 64; i ++) {
+        int firstAvailableInd1 = 64;
+        int firstAvailableInd2 = 64;
+        for (int i = mapInfoStart1; i < 64; i ++) {
             if (rc.readSharedArray(i) == 0) {
-                firstAvailableInd = i;
-                break;
+                if (i >= mapInfoStart1 && i < mapInfoStart2 && firstAvailableInd1 == 64) {
+                    firstAvailableInd1 = i;
+                } else if (firstAvailableInd2 == 64) {
+                    firstAvailableInd2 = i;
+                }
             }
         }
-        if (firstAvailableInd == 64) {
+        if (firstAvailableInd1 == 64 && firstAvailableInd2 == 64) {
             return;
         }
         MapInfo[] mapInfos = rc.senseNearbyMapInfos();
         for (MapInfo mapInfo : mapInfos) {
+            if (firstAvailableInd1 == 64 && firstAvailableInd2 == 64) {
+                return;
+            }
             int encoded = mapInfoToInt(rc, mapInfo);
             if (encoded != -1) {
-                if (rc.canWriteSharedArray(firstAvailableInd,encoded)) {
-                    rc.writeSharedArray(firstAvailableInd, encoded);
+                int locType = encoded & 0b1111;
+                if (locType >= 11 && locType <= 15 && firstAvailableInd1 < mapInfoStart2) {
+                    if (rc.canWriteSharedArray(firstAvailableInd1,encoded)) {
+                        rc.writeSharedArray(firstAvailableInd1, encoded);
+                    }
+                    firstAvailableInd1++;
+                } else if (locType < 11 && firstAvailableInd2 < 64 && rng.nextInt(3) == 1) {
+                    if (rc.canWriteSharedArray(firstAvailableInd2,encoded)) {
+                        rc.writeSharedArray(firstAvailableInd2, encoded);
+                    }
+                    firstAvailableInd2++;
                 }
-                firstAvailableInd++;
-                if (firstAvailableInd == 64) {
-                    return;
-                }
+                
+                
             }
             if (Clock.getBytecodeNum() - byteCodeStart >= rc.getType().bytecodeLimit/4) {
                 break;
@@ -362,7 +376,7 @@ public strictfp class RobotPlayer {
 
     static Set<MapLocation> impassibleLocations = new TreeSet<MapLocation>();
     static Set<Current> currentLocations = new TreeSet<Current>();
-    static Set<Well> wellLocations = new TreeSet<Well>();
+    static Map<MapLocation, ResourceType> wellLocations = new TreeMap<MapLocation, ResourceType>();
     static Map<MapLocation, Team> islandLocations = new TreeMap<MapLocation, Team>(); //neutral island means unoccupied or occupied by other team
     static Set<MapLocation> cloudLocations = new TreeSet<MapLocation>();
 
@@ -393,7 +407,7 @@ public strictfp class RobotPlayer {
 
         } else if (broadcastedMapInfo.locType >= 10 && broadcastedMapInfo.locType <= 13) { //well
 
-            wellLocations.add(new Well(broadcastedMapInfo.location, intToResourceType(broadcastedMapInfo.locType)));
+            wellLocations.put(broadcastedMapInfo.location, intToResourceType(broadcastedMapInfo.locType));
 
         } else if (broadcastedMapInfo.locType >= 14 && broadcastedMapInfo.locType <= 15) { //island
 
@@ -405,10 +419,10 @@ public strictfp class RobotPlayer {
 
     static void readBroadcastedMapInfos(RobotController rc) throws GameActionException {
         int byteCodeStart = Clock.getBytecodeNum();
-        for (int i = mapInfoStart; i < 64; i ++) {
+        for (int i = mapInfoStart1; i < 64; i ++) {
             int currVal = rc.readSharedArray(i);
             if (currVal == 0) {
-                return;
+                continue;
             }
             BroadcastedMapInfo currBroadcastedMapInfo = intToBroadcastedInfo(rc, currVal);
             
@@ -420,14 +434,10 @@ public strictfp class RobotPlayer {
     }
 
     static void indicateMapInfos(RobotController rc) {
-        // for (MapLocation mapLocation : impassibleLocations) {
-        //     rc.setIndicatorDot(mapLocation, 255, 255, 255);
-        // }
-
-        // for (Well well : wellLocations) {
-        //     rc.setIndicatorDot(well.location, 255, 255, 255);
-        // }
-
+        for (MapLocation mapLocation : impassibleLocations) {
+            rc.setIndicatorDot(mapLocation, 255, 255, 255);
+        }
+        
         // for (MapLocation mapLocation : cloudLocations) {
         //     rc.setIndicatorDot(mapLocation, 255, 255, 255);
         // }
@@ -435,6 +445,11 @@ public strictfp class RobotPlayer {
         // for (Current current : currentLocations) {
         //     rc.setIndicatorDot(current.location, 255, 255, 255);
         // }
+
+        // for (MapLocation well : wellLocations.keySet()) {
+        //     rc.setIndicatorDot(well, 255, 255, 255);
+        // }
+
 
         // for (MapLocation islandLoc : islandLocations.keySet()) {
         //     if (islandLocations.get(islandLoc) == Team.A) {
@@ -465,7 +480,7 @@ public strictfp class RobotPlayer {
 
         if (rc.readSharedArray(0) == numHeadquarters) { //is first to run
             if (rc.getRoundNum() % 2 == 1) { //clear map info queue after even turns (odd turns for writing, even turns for reading)
-                for (int i = mapInfoStart; i < sharedArraySize; i ++) {
+                for (int i = mapInfoStart1; i < sharedArraySize; i ++) {
                     if (rc.readSharedArray(i) != 0) {
                         rc.writeSharedArray(i, 0);
                     } else {
@@ -487,12 +502,12 @@ public strictfp class RobotPlayer {
         MapLocation newLoc = null;
         for (Direction dir : directions) {
             newLoc = rc.getLocation().add(dir);
-            if (rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
+            if (rc.onTheMap(newLoc) && rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
                 break;
             }
         }
 
-        if (rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
+        if (rc.onTheMap(newLoc) && rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
             float[] reccAmounts = {0, 0, 0, 0, 0};
             int totalCountedRobots = 0;
             float totalRatio = 0;
@@ -525,7 +540,7 @@ public strictfp class RobotPlayer {
                     }
                 }
                 if (resourceType == ResourceType.ADAMANTIUM || resourceType == ResourceType.MANA) {
-                    Set<MapLocation> visited = new TreeSet<MapLocation>();
+                    // Set<MapLocation> visited = new TreeSet<MapLocation>();
                     // int numOccupiedIslands = 0;
                     // for (MapLocation islandLoc : islandLocations.keySet()) {
                     //     Team res = islandLocations.get(islandLoc);
@@ -575,19 +590,30 @@ public strictfp class RobotPlayer {
     static MapLocation currMoveTarget = null;
 
     static boolean isUnloading = false;
+    static boolean isLoading = false;
+
+    static void pathfindTowardMoveTarget(RobotController rc) throws GameActionException {
+        if (currMoveTarget != null && !rc.getLocation().equals(currMoveTarget)) { //TODO: general navigation
+            rc.setIndicatorString(currMoveTarget.x + " " + currMoveTarget.y);
+            Direction dir = rc.getLocation().directionTo(currMoveTarget);
+            if (rc.canMove(dir)) {
+                rc.move(dir);
+            } else {
+                randomMove(rc);
+            }
+        }
+        if (rc.getLocation().equals(currMoveTarget)) {
+            currMoveTarget = null;
+        }
+    }
+
     static void runCarrier(RobotController rc) throws GameActionException {
+        MapLocation me = rc.getLocation();
         if (rc.getAnchor() != null) {
             if (rc.canWriteSharedArray(0,0)) {
                 rc.writeSharedArray(6, rc.readSharedArray(6)+1);
             }
-            // // If I have an anchor singularly focus on getting it to the first island I see
-            // int[] islands = rc.senseNearbyIslands();
-            // Set<MapLocation> islandLocs = new HashSet<>();
-            // for (int id : islands) {
-            //     MapLocation[] thisIslandLocs = rc.senseNearbyIslandLocations(id);
-            //     islandLocs.addAll(Arrays.asList(thisIslandLocs));
-            // }
-            if (islandLocations.size() > 0) {
+            if (islandLocations.size() >= 1) {
                 if (currMoveTarget == null) {
                     for (MapLocation mapLocation : islandLocations.keySet()) {
                         if (islandLocations.get(mapLocation) == Team.NEUTRAL) {
@@ -598,31 +624,51 @@ public strictfp class RobotPlayer {
                 }
                 
                 if (currMoveTarget != null) {
-                    if (!rc.getLocation().equals(currMoveTarget)) { //TODO: general navigation (i.e. custom "directionTo" method based on currMoveTarget)
-                        Direction dir = rc.getLocation().directionTo(currMoveTarget);
-                        if (rc.canMove(dir)) {
-                            rc.move(dir);
-                        }
-                    } else {
+                    if (rc.getLocation().equals(currMoveTarget)) {
                         if (rc.canPlaceAnchor()) {
                             rc.placeAnchor();
+                            int encoded = mapInfoToInt(rc, rc.senseMapInfo(rc.getLocation()));
+                            if (rc.canWriteSharedArray(mapInfoStart2-1, encoded)) {
+                                rc.writeSharedArray(mapInfoStart2-1, encoded);
+                            }
                         }
+                    }
+                    if (islandLocations.get(currMoveTarget) == rc.getTeam()) {
                         currMoveTarget = null;
                     }
-                } else {
-                    randomMove(rc);
                 }
-            } else {
-                randomMove(rc);
+            }
+        } else {
+            if (!isUnloading && rc.getResourceAmount(ResourceType.ADAMANTIUM) + rc.getResourceAmount(ResourceType.MANA) + rc.getResourceAmount(ResourceType.ELIXIR) == 40) {
+                currMoveTarget = spawnPoint;
+            } else if (!isUnloading && !isLoading) {
+                if (wellLocations.size() >= 1) {
+                    ResourceType targetType = ResourceType.values()[rng.nextInt(2)]; //TODO: include elixir wells when converted
+                    for (MapLocation well : wellLocations.keySet()) {
+                        if (wellLocations.get(well) == targetType) {
+                            currMoveTarget = well;
+                            break;
+                        }
+                    }
+                } else {
+                    currMoveTarget = null;
+                }
             }
         }
+        if (!isLoading && !isUnloading) {
+            pathfindTowardMoveTarget(rc);
+            randomMove(rc);
+        }
+
+
         // Try to gather from and transfer to squares around us.
-        MapLocation me = rc.getLocation();
         isUnloading = false;
+        isLoading = false;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 MapLocation newLocation = new MapLocation(me.x + dx, me.y + dy);
                 if (rc.canCollectResource(newLocation, -1)) {
+                    isLoading = true;
                     rc.collectResource(newLocation, -1);
                 }
                 if (rc.canTakeAnchor(newLocation, Anchor.STANDARD)) {
@@ -637,7 +683,7 @@ public strictfp class RobotPlayer {
                 }
             }
         }
-        rc.setIndicatorString("Is unloading: " + String.valueOf(isUnloading));
+        rc.setIndicatorString("unloading: " + String.valueOf(isUnloading) + " | loading: " + String.valueOf(isLoading) + " | " + currMoveTarget);
        // Occasionally try out the carriers attack
         RobotInfo[] nearbyRobots = rc.senseNearbyRobots(-1, rc.getTeam());
         boolean enemyHasAttackers = false;
@@ -663,29 +709,6 @@ public strictfp class RobotPlayer {
                 rc.attack(firstEnemy.location);
             }
         }
-
-        if (!isUnloading && rc.getResourceAmount(ResourceType.ADAMANTIUM) + rc.getResourceAmount(ResourceType.MANA) + rc.getResourceAmount(ResourceType.ELIXIR) < 40) {
-            // If we can see a well, move towards it
-            WellInfo[] wells = rc.senseNearbyWells();
-            if (wells.length >= 1) {
-                WellInfo targetWell = wells[0];
-                Direction dir = me.directionTo(targetWell.getMapLocation());  //TODO: set well as target, do movement after all checks (moving to islands too)
-                if (rc.canMove(dir)) {
-                    rc.move(dir);
-                }
-            }
-        } else {
-            Direction dir = me.directionTo(spawnPoint); //TODO: store multiple headquarters
-            if (rc.canMove(dir)) {
-                rc.move(dir);
-            }
-        }
-
-
-        // Also try to move randomly.
-        if (!isUnloading) {
-            randomMove(rc);
-        }
     }
 
     static void runLauncher(RobotController rc) throws GameActionException {
@@ -701,33 +724,18 @@ public strictfp class RobotPlayer {
             }
         }
 
-        // Also try to move randomly.
-        // Direction dir = directions[rng.nextInt(directions.length)];
-        // if (rc.canMove(dir)) {
-        //     rc.move(dir);
-        // }
-
-        if (islandLocations.size() > 0) {
-            if (currMoveTarget == null) {
+        if (currMoveTarget == null) {
+            if (islandLocations.size() > 0) {
                 for (MapLocation mapLocation : islandLocations.keySet()) {
-                    if (islandLocations.get(mapLocation) == Team.NEUTRAL && rng.nextInt(rc.getIslandCount()) == 0) { //TODO: (unrelated to code here) create channel in shared array specializing in island and well updates (priority)
+                    if (islandLocations.get(mapLocation) == Team.NEUTRAL && rng.nextInt(islandLocations.size()) == 1) { //TODO: (unrelated to code here) create channel in shared array specializing in island and well updates (priority)
                         currMoveTarget = mapLocation;
                         break;
                     }
                 }
             }
-            if (currMoveTarget != null) {
-                if (!rc.getLocation().equals(currMoveTarget)) { //TODO: general navigation
-                    rc.setIndicatorString(currMoveTarget.x + " " + currMoveTarget.y);
-                    Direction dir = rc.getLocation().directionTo(currMoveTarget);
-                    if (rc.canMove(dir)) {
-                        rc.move(dir);
-                    }
-                } else {
-                    currMoveTarget = null;
-                }
-            }
         }
+        rc.setIndicatorString(String.valueOf(currMoveTarget));
+        pathfindTowardMoveTarget(rc);
         randomMove(rc);
     }
 

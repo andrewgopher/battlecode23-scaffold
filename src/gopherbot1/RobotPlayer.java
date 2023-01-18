@@ -219,7 +219,7 @@ public strictfp class RobotPlayer {
         MapLocation newLoc = null;
         for (Direction dir : directions) {
             newLoc = rc.getLocation().add(dir);
-            if (rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
+            if (rc.onTheMap(newLoc) && rc.sensePassability(newLoc) && rc.senseRobotAtLocation(newLoc) == null) {
                 break;
             }
         }
