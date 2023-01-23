@@ -28,6 +28,11 @@ public strictfp class RobotPlayer {
         public static Vector2 subtract(Vector2 v) {
             return new Vector2(x-v.x, y-v.y);
         }
+
+        public static Vector2 multiply(float m) {
+            return new Vector2(x*m, y*m);
+        }
+
         public static Vector2 normalized() {
             return new Vector2(1/getLength()*x, 1/getLength()*y);
         }
@@ -36,8 +41,8 @@ public strictfp class RobotPlayer {
             return radiansToDegrees((float) Math.atan2(y,x));
         }
 
-        public static Direction toDirection() {
-            int degree45 = ((int) (Math.round(getAngle() / 45)*45)+720)%360;
+        public static Direction angleToDirection(float angle) {
+            int degree45 = ((int) (Math.round(angle / 45)*45)+720)%360;
             switch (degree45) {
                 case 0:
                     return Direction.EAST;
@@ -59,6 +64,10 @@ public strictfp class RobotPlayer {
                     return Direction.CENTER;
             }
         }
+
+        public static Direction toDirection() {
+            return angleToDirection(getAngle());
+        }
     }
 
     /**
@@ -67,6 +76,8 @@ public strictfp class RobotPlayer {
      * these variables are static, in Battlecode they aren't actually shared between your robots.
      */
     static int turnCount = 0;
+    static int sumX = 0;
+    static int sumY = 0;
     static final int mapInfoStart1 = 7; //where the map info queue starts in the shared array; WELL AND ISLAND ONLY
     static final int mapInfoStart2 = 27;
     static final int sharedArraySize = 64;
@@ -74,12 +85,12 @@ public strictfp class RobotPlayer {
     /**
      * A random number generator.
      * We will use this RNG to make some random moves. The Random class is provided by the java.util.Random
-     * import at the top of this file. Here, we *seed* the RNG with a constant number (6147); this makes sure
+     * import at the top of this file. Here, we *seed* the RNG with a constant number (69420); this makes sure
      * we get the same sequence of numbers every time this code is run. This is very useful for debugging!
      */
     static final Random rng = new Random(69420);
 
-    static float[] buildRatios = {5, 6, 2,3, 2};
+    static float[] buildRatios = {5, 6, 1, 2, 2};
 
     static int robotTypeToInt(RobotType robotType) {
         if (robotType == RobotType.HEADQUARTERS) {
@@ -138,6 +149,8 @@ public strictfp class RobotPlayer {
         spawnPoint = rc.getLocation();
         while (true) {
             turnCount += 1;  // We have now been alive for one more turn!
+            sumX += rc.getLocation().x;
+            sumY += rc.getLocation().y;
 
             try {
                 if (rc.getType() != RobotType.HEADQUARTERS && rc.canWriteSharedArray(0, 0)) {
@@ -296,30 +309,68 @@ public strictfp class RobotPlayer {
                 }
             }
         }
-        if (firstAvailableInd1 == 64 && firstAvailableInd2 == 64) {
+        if (firstAvailableInd1 == mapInfoStart2 && firstAvailableInd2 == 64) {
             return;
         }
+
+        
+        for (int islandInd : rc.senseNearbyIslands()) {
+            if (firstAvailableInd1 == mapInfoStart2) {
+                break;
+            }
+            MapLocation[] mapLocations = rc.senseNearbyIslandLocations(islandInd);
+            for (MapLocation mapLocation : mapLocations) {
+                if (firstAvailableInd1 == mapInfoStart2) {
+                    break;
+                }
+                int encoded = mapInfoToInt(rc, new MapInfo(mapLocation, false, true, null, Direction.CENTER, null, null));
+
+                if (rc.canWriteSharedArray(firstAvailableInd1,encoded)) {
+                    rc.writeSharedArray(firstAvailableInd1, encoded);
+                }
+                firstAvailableInd1++;
+                if (Clock.getBytecodeNum() - byteCodeStart >= rc.getType().bytecodeLimit/4) {
+                    break;
+                }
+            }
+        }
+
+        WellInfo[] wellInfos = rc.senseNearbyWells();
+        for (WellInfo wellInfo : wellInfos) {
+            if (firstAvailableInd1 == mapInfoStart2) {
+                break;
+            }
+            int encoded = mapInfoToInt(rc, new MapInfo(wellInfo.getMapLocation(), false, true, null, Direction.CENTER, null, null));
+
+            if (rc.canWriteSharedArray(firstAvailableInd1,encoded)) {
+                rc.writeSharedArray(firstAvailableInd1, encoded);
+            }
+            firstAvailableInd1++;
+            if (Clock.getBytecodeNum() - byteCodeStart >= rc.getType().bytecodeLimit/4) {
+                break;
+            }
+        }
+
         MapInfo[] mapInfos = rc.senseNearbyMapInfos();
+
         for (MapInfo mapInfo : mapInfos) {
-            if (firstAvailableInd1 == 64 && firstAvailableInd2 == 64) {
+            if (firstAvailableInd1 == mapInfoStart2 && firstAvailableInd2 == 64) {
                 return;
             }
             int encoded = mapInfoToInt(rc, mapInfo);
             if (encoded != -1) {
                 int locType = encoded & 0b1111;
                 if (locType >= 11 && locType <= 15 && firstAvailableInd1 < mapInfoStart2) {
-                    if (rc.canWriteSharedArray(firstAvailableInd1,encoded)) {
-                        rc.writeSharedArray(firstAvailableInd1, encoded);
-                    }
-                    firstAvailableInd1++;
+                    // if (rc.canWriteSharedArray(firstAvailableInd1,encoded)) {
+                    //     rc.writeSharedArray(firstAvailableInd1, encoded);
+                    // }
+                    // firstAvailableInd1++;
                 } else if (locType < 11 && firstAvailableInd2 < 64 && rng.nextInt(3) == 1) {
                     if (rc.canWriteSharedArray(firstAvailableInd2,encoded)) {
                         rc.writeSharedArray(firstAvailableInd2, encoded);
                     }
                     firstAvailableInd2++;
                 }
-                
-                
             }
             if (Clock.getBytecodeNum() - byteCodeStart >= rc.getType().bytecodeLimit/4) {
                 break;
@@ -348,29 +399,6 @@ public strictfp class RobotPlayer {
 
         Direction direction;
         MapLocation location;
-    }
-
-    private static class Well implements Comparable<Well> {
-        Well(MapLocation argLocation, ResourceType argResourceType) {
-            location = argLocation;
-            resourceType = argResourceType;
-        }
-
-        @Override
-        public int hashCode() {
-            return location.hashCode() ^ resourceType.hashCode();
-        }
-
-        public int compareTo(Well other) {
-            if (location != other.location) {
-                return location.compareTo(other.location);
-            } else {
-                return resourceType.compareTo(other.resourceType);
-            }
-        }
-
-        MapLocation location;
-        ResourceType resourceType;
     }
 
 
@@ -434,9 +462,9 @@ public strictfp class RobotPlayer {
     }
 
     static void indicateMapInfos(RobotController rc) {
-        for (MapLocation mapLocation : impassibleLocations) {
-            rc.setIndicatorDot(mapLocation, 255, 255, 255);
-        }
+        // for (MapLocation mapLocation : impassibleLocations) {
+        //     rc.setIndicatorDot(mapLocation, 255, 255, 255);
+        // }
         
         // for (MapLocation mapLocation : cloudLocations) {
         //     rc.setIndicatorDot(mapLocation, 255, 255, 255);
@@ -446,18 +474,18 @@ public strictfp class RobotPlayer {
         //     rc.setIndicatorDot(current.location, 255, 255, 255);
         // }
 
-        // for (MapLocation well : wellLocations.keySet()) {
-        //     rc.setIndicatorDot(well, 255, 255, 255);
-        // }
+        for (MapLocation well : wellLocations.keySet()) {
+            rc.setIndicatorDot(well, 255, 255, 255);
+        }
 
 
-        // for (MapLocation islandLoc : islandLocations.keySet()) {
-        //     if (islandLocations.get(islandLoc) == Team.A) {
-        //         rc.setIndicatorDot(islandLoc, 255, 0, 0);
-        //     } else {
-        //         rc.setIndicatorDot(islandLoc, 0, 0, 255);
-        //     }
-        // }
+        for (MapLocation islandLoc : islandLocations.keySet()) {
+            if (islandLocations.get(islandLoc) == Team.A) {
+                rc.setIndicatorDot(islandLoc, 255, 0, 0);
+            } else {
+                rc.setIndicatorDot(islandLoc, 0, 0, 255);
+            }
+        }
     }
 
     static void dfsIslandVisited(MapLocation loc, Set<MapLocation> visited) {
@@ -552,14 +580,14 @@ public strictfp class RobotPlayer {
                     //     }
                     // }
                     //TODO: fix numOccupiedIslands and well resource types (bcs conversion)
-                    float anchorDiff = (rc.readSharedArray(1)*0.1f - rc.readSharedArray(6))/(float)numHeadquarters - rc.getNumAnchors(Anchor.STANDARD);
+                    float anchorDiff = (rc.readSharedArray(1)*0.2f - rc.readSharedArray(6))/(float)numHeadquarters - rc.getNumAnchors(Anchor.STANDARD);
                     indicatorString += "| " + round(anchorDiff) + "," + round(maxBuildDiff);
     
                     if (anchorDiff > maxBuildDiff && anchorDiff < rc.readSharedArray(robotTypeToInt(RobotType.CARRIER))) {
                         if (rc.canBuildAnchor(Anchor.STANDARD)) {
                             rc.buildAnchor(Anchor.STANDARD);
+                            break;
                         }
-                        break;
                     }
                 }
     
@@ -588,6 +616,7 @@ public strictfp class RobotPlayer {
     }
 
     static MapLocation currMoveTarget = null;
+    static boolean moveTargetIsWell = false;
 
     static boolean isUnloading = false;
     static boolean isLoading = false;
@@ -602,13 +631,17 @@ public strictfp class RobotPlayer {
                 randomMove(rc);
             }
         }
-        if (rc.getLocation().equals(currMoveTarget)) {
+        if (rc.getLocation().equals(currMoveTarget) || (moveTargetIsWell && rc.getLocation().isAdjacentTo(currMoveTarget))) {
             currMoveTarget = null;
+            moveTargetIsWell = false;
         }
     }
 
     static void runCarrier(RobotController rc) throws GameActionException {
+        String indicatorString = "";
+
         MapLocation me = rc.getLocation();
+        boolean foundWellTarget = false;
         if (rc.getAnchor() != null) {
             if (rc.canWriteSharedArray(0,0)) {
                 rc.writeSharedArray(6, rc.readSharedArray(6)+1);
@@ -622,36 +655,46 @@ public strictfp class RobotPlayer {
                         }
                     }
                 }
+            }
                 
-                if (currMoveTarget != null) {
-                    if (rc.getLocation().equals(currMoveTarget)) {
-                        if (rc.canPlaceAnchor()) {
-                            rc.placeAnchor();
-                            int encoded = mapInfoToInt(rc, rc.senseMapInfo(rc.getLocation()));
-                            if (rc.canWriteSharedArray(mapInfoStart2-1, encoded)) {
-                                rc.writeSharedArray(mapInfoStart2-1, encoded);
-                            }
+            if (currMoveTarget != null) {
+                if (rc.getLocation().equals(currMoveTarget)) {
+                    if (rc.canPlaceAnchor()) {
+                        rc.placeAnchor();
+                        int encoded = mapInfoToInt(rc, rc.senseMapInfo(rc.getLocation()));
+                        if (rc.canWriteSharedArray(mapInfoStart2-1, encoded)) {
+                            rc.writeSharedArray(mapInfoStart2-1, encoded);
                         }
                     }
-                    if (islandLocations.get(currMoveTarget) == rc.getTeam()) {
-                        currMoveTarget = null;
+                }
+                if (islandLocations.get(currMoveTarget) == rc.getTeam()) {
+                    currMoveTarget = null;
+                    int encoded = mapInfoToInt(rc, rc.senseMapInfo(rc.getLocation()));
+                    if (rc.canWriteSharedArray(mapInfoStart2-1, encoded)) {
+                        rc.writeSharedArray(mapInfoStart2-1, encoded);
                     }
                 }
+            }
+            if (rc.canPlaceAnchor() && rc.senseTeamOccupyingIsland(rc.senseIsland(rc.getLocation())) != rc.getTeam()) {
+                rc.placeAnchor();
             }
         } else {
             if (!isUnloading && rc.getResourceAmount(ResourceType.ADAMANTIUM) + rc.getResourceAmount(ResourceType.MANA) + rc.getResourceAmount(ResourceType.ELIXIR) == 40) {
                 currMoveTarget = spawnPoint;
-            } else if (!isUnloading && !isLoading) {
-                if (wellLocations.size() >= 1) {
-                    ResourceType targetType = ResourceType.values()[rng.nextInt(2)]; //TODO: include elixir wells when converted
+            } else if (!isUnloading && !isLoading && currMoveTarget == null) {
+                if (wellLocations.size() >= 1 && rng.nextInt(3) == 0) {
+                    ResourceType targetType = ResourceType.values()[turnCount%2+1]; //TODO: include elixir wells when converted
+                    int minWellDistSquared = Integer.MAX_VALUE;
                     for (MapLocation well : wellLocations.keySet()) {
-                        if (wellLocations.get(well) == targetType) {
+                        if (wellLocations.get(well) == targetType && well.distanceSquaredTo(rc.getLocation())<minWellDistSquared && well.distanceSquaredTo(rc.getLocation())<200) {
+                            foundWellTarget = true;
                             currMoveTarget = well;
-                            break;
+                            moveTargetIsWell = true;
+                            minWellDistSquared = well.distanceSquaredTo(rc.getLocation());
                         }
                     }
                 } else {
-                    currMoveTarget = null;
+                    currMoveTarget = new MapLocation(rc.getMapHeight()-1-spawnPoint.x, rc.getMapWidth()-1-spawnPoint.y);
                 }
             }
         }
@@ -660,6 +703,7 @@ public strictfp class RobotPlayer {
             randomMove(rc);
         }
 
+        indicatorString += " | " + String.valueOf(currMoveTarget);
 
         // Try to gather from and transfer to squares around us.
         isUnloading = false;
@@ -667,7 +711,7 @@ public strictfp class RobotPlayer {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 MapLocation newLocation = new MapLocation(me.x + dx, me.y + dy);
-                if (rc.canCollectResource(newLocation, -1)) {
+                if (((currMoveTarget == null && foundWellTarget) || (currMoveTarget != null && !foundWellTarget)) && rc.canCollectResource(newLocation, -1)) {
                     isLoading = true;
                     rc.collectResource(newLocation, -1);
                 }
@@ -683,8 +727,10 @@ public strictfp class RobotPlayer {
                 }
             }
         }
-        rc.setIndicatorString("unloading: " + String.valueOf(isUnloading) + " | loading: " + String.valueOf(isLoading) + " | " + currMoveTarget);
-       // Occasionally try out the carriers attack
+        indicatorString += " | unloading: " + String.valueOf(isUnloading) + " | loading: " + String.valueOf(isLoading);
+        rc.setIndicatorString(indicatorString);
+
+
         RobotInfo[] nearbyRobots = rc.senseNearbyRobots(-1, rc.getTeam());
         boolean enemyHasAttackers = false;
         boolean selfHasAttackers = false;
@@ -717,7 +763,7 @@ public strictfp class RobotPlayer {
         Team opponent = rc.getTeam().opponent();
         RobotInfo[] enemies = rc.senseNearbyRobots(radius, opponent);
         if (enemies.length >= 1) {
-            MapLocation toAttack = enemies[0].location;
+            MapLocation toAttack = enemies[0].location;//TODO: bias for attacking certain robot types
 
             if (rc.canAttack(toAttack)) {
                 rc.attack(toAttack);
@@ -725,13 +771,15 @@ public strictfp class RobotPlayer {
         }
 
         if (currMoveTarget == null) {
-            if (islandLocations.size() > 0) {
+            if (islandLocations.size() > 0 && rng.nextInt(20) == 0) {
                 for (MapLocation mapLocation : islandLocations.keySet()) {
                     if (islandLocations.get(mapLocation) == Team.NEUTRAL && rng.nextInt(islandLocations.size()) == 1) { //TODO: (unrelated to code here) create channel in shared array specializing in island and well updates (priority)
                         currMoveTarget = mapLocation;
                         break;
                     }
                 }
+            } else {
+                currMoveTarget = new MapLocation(rc.getMapHeight()-1-spawnPoint.x, rc.getMapWidth()-1-spawnPoint.y);
             }
         }
         rc.setIndicatorString(String.valueOf(currMoveTarget));
@@ -739,23 +787,28 @@ public strictfp class RobotPlayer {
         randomMove(rc);
     }
 
-    static void followTeammates(RobotController rc) throws GameActionException{
+    static void exploreMove(RobotController rc) throws GameActionException {
+        Vector2 avgPos = new Vector2((float) sumX / (float) turnCount, (float) sumY / (float) turnCount);
+        Direction direction = Vector2.angleToDirection(new Vector2(rc.getLocation().x, rc.getLocation().y).subtract(avgPos).getAngle() + rng.nextFloat()*180-90);
+        if (rc.canMove(direction)) {
+            rc.move(direction);
+        } else {
+            randomMove(rc);
+        }
+    }
+
+    static void followTeammates(RobotController rc, float[] weights) throws GameActionException{
         MapLocation me = rc.getLocation();
         Vector2 currVector = new Vector2(0,0);
         RobotInfo[] robotInfos = rc.senseNearbyRobots(-1, rc.getTeam());
-        int numNearbyAmplifiers = 0;
         for (RobotInfo robotInfo : robotInfos) {
-            if (robotInfo.getType() != RobotType.AMPLIFIER && robotInfo.getType() != RobotType.HEADQUARTERS) {
-                Vector2 normVectorToRobot = (new Vector2(robotInfo.getLocation().x-me.x, robotInfo.getLocation().y-me.y)).normalized();
-                currVector = currVector.add(normVectorToRobot);
-            } else if (robotInfo.getType() == RobotType.AMPLIFIER) {
-                numNearbyAmplifiers++;
-            }
+            Vector2 normVectorToRobot = (new Vector2(robotInfo.getLocation().x-me.x, robotInfo.getLocation().y-me.y)).normalized();
+            currVector = currVector.add(normVectorToRobot.multiply(weights[robotTypeToInt(robotInfo.getType())]));
         }
 
         Direction direction = currVector.toDirection();
         rc.setIndicatorString(currVector.x + " " + currVector.y + " " + String.valueOf(currVector.getAngle()));
-        if ((currVector.x != 0 || currVector.y != 0) && rc.canMove(direction) && numNearbyAmplifiers <= 1) { //at most one other friendly amplifier
+        if ((currVector.x != 0 || currVector.y != 0) && rc.canMove(direction)) { //at most one other friendly amplifier
             rc.move(direction);
         } else {
             direction = rc.getLocation().directionTo(spawnPoint); //try to move back to spawn and find another robot to follow on the way there
@@ -768,14 +821,17 @@ public strictfp class RobotPlayer {
     }
 
     static void runBooster(RobotController rc) throws GameActionException {
-        followTeammates(rc);
+        float[] weights = {-0.3f,1,1,1,1,1,1};
+        followTeammates(rc, weights);
     }
 
     static void runDestabilizer(RobotController rc) throws GameActionException {
-        followTeammates(rc);
+        float[] weights = {-0.3f,1,1,1,1,1,1};
+        followTeammates(rc, weights);
     }
 
     static void runAmplifier(RobotController rc) throws GameActionException {
-        followTeammates(rc);
+        float[] weights = {-0.3f,1,1,1,1,1,-1};
+        followTeammates(rc, weights);
     }
 }
